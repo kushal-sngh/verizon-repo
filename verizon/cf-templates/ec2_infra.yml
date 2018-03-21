@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation  Template to Create an Amazon EC2 instance running the Amazon Linux AMI.'
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: "ami-97785bed"
+    us-west-1:
+      AMI: "ami-734c6936"
+    us-west-2:
+      AMI: "ami-48da5578"
+    eu-west-1:
+      AMI: "ami-6d555119"
+
+Parameters:
+    InstanceType:
+        Description: Web Hosting EC2 instance 
+        Type: String
+        Default: t1.micro
+    S3BucketName:
+         Description: Bucket for authorized keys
+         Type: String    
+         Default: verizoninfrabucket
+
+    EnvironmentName:
+         Description: Env name
+         Type: String
+         Default: sandbox    
+    VpcCIDR: 
+        Description: Please enter the IP range (CIDR notation) for this VPC
+        Type: String
+        Default: 10.192.0.0/16
+
+    PublicSubnetCIDR:
+        Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+        Type: String
+        Default: 10.192.10.0/24
+          
+  
+Resources:    
+    VPC: 
+        Type: AWS::EC2::VPC
+        Properties:
+            CidrBlock: !Ref VpcCIDR
+            Tags: 
+                - Key: Name 
+                  Value: !Ref EnvironmentName     
+    InternetGateway:
+        Type: AWS::EC2::InternetGateway
+        Properties:
+            Tags:
+                - Key: Name
+                  Value: !Ref EnvironmentName        
+    InternetGatewayAttachment:
+        Type: AWS::EC2::VPCGatewayAttachment
+        Properties:
+            InternetGatewayId: !Ref InternetGateway
+            VpcId: !Ref VPC
+    PublicSubnet: 
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId: !Ref VPC
+            AvailabilityZone: !Select [ 0, !GetAZs ]
+            CidrBlock: !Ref PublicSubnetCIDR
+            MapPublicIpOnLaunch: true
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Public Subnet 
+    NatGatewayEIP:
+        Type: AWS::EC2::EIP
+        DependsOn: InternetGatewayAttachment
+        Properties: 
+            Domain: vpc
+    NatGateway: 
+        Type: AWS::EC2::NatGateway
+        Properties: 
+            AllocationId: !GetAtt NatGatewayEIP.AllocationId
+            SubnetId: !Ref PublicSubnet
+    PublicRouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties: 
+            VpcId: !Ref VPC
+            Tags: 
+                - Key: Name 
+                  Value: !Sub ${EnvironmentName} Public Routes
+    DefaultPublicRoute: 
+        Type: AWS::EC2::Route
+        DependsOn: InternetGatewayAttachment
+        Properties: 
+            RouteTableId: !Ref PublicRouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId: !Ref InternetGateway
+
+    PublicSubnetRouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId: !Ref PublicRouteTable
+            SubnetId: !Ref PublicSubnet
+    
+    S3AccessRole:
+        Type: 'AWS::IAM::Role'
+        Properties:
+          AssumeRolePolicyDocument:
+           Statement:
+             - 
+               Effect: Allow
+               Principal:
+                 Service:
+                   - ec2.amazonaws.com
+               Action:
+                 - 'sts:AssumeRole'
+          Path: /
+    S3RolePolicies:
+        Type: 'AWS::IAM::Policy'
+        Properties:
+          PolicyName: s3access
+          PolicyDocument:
+            Statement:
+             - 
+               Effect: Allow
+               Action: 's3:*'
+               Resource: "*"
+          Roles:
+             - !Ref S3AccessRole
+    InstanceProfile:
+        Type: 'AWS::IAM::InstanceProfile'
+        Properties:
+          Path: /
+          Roles:
+             - !Ref S3AccessRole
+        
+    EC2Instance:
+        Type: 'AWS::EC2::Instance'                     
+        Properties:
+            InstanceType:
+                !Ref InstanceType
+            SecurityGroupIds:
+                -   Fn::GetAtt: [ InstanceSecurityGroup, GroupId ]
+            ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+            SubnetId:  !Ref PublicSubnet       
+            IamInstanceProfile: !Ref InstanceProfile
+            UserData: 
+                Fn::Base64: !Sub |
+                    #!/bin/bash
+                    sudo useradd -m bob
+                    sudo useradd -m alice   
+                    echo "bob    ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+                    echo "alice    ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+                    sudo mkdir /home/bob/.ssh
+                    sudo mkdir /home/alice/.ssh                    
+                    sudo aws s3 cp s3://${S3BucketName}/authorized_keys /home/bob/.ssh/ 
+                    sudo aws s3 cp s3://${S3BucketName}/authorized_keys /home/alice/.ssh/    
+                    sudo chmod 0600 /home/bob/.ssh/authorized_keys   
+                    sudo chmod 0600 /home/alice/.ssh/authorized_keys   
+                    sudo chown bob:bob /home/bob/.ssh/authorized_keys
+                    sudo chown alice:alice /home/alice/.ssh/authorized_keys                       
+            
+    InstanceSecurityGroup:
+       Type: AWS::EC2::SecurityGroup
+       Properties:
+          GroupDescription: Security group for ec2
+          VpcId: !Ref VPC
+          SecurityGroupIngress:
+              - IpProtocol: tcp
+                FromPort: 22
+                ToPort: 22
+                CidrIp: 204.13.56.3/32
+              - IpProtocol: tcp
+                FromPort: 22
+                ToPort: 22
+                CidrIp: 176.33.122.64/32               
+              - IpProtocol: tcp
+                FromPort: 443
+                ToPort: 443
+                CidrIp: 0.0.0.0/0   
+          Tags: 
+                - Key: Name
+                  Value: !Join ["-",[ !Ref "AWS::StackName",WebHostingSG ]]  
+    EIPAddress:
+        Type: 'AWS::EC2::EIP'
+        Properties:
+           Domain: vpc
+    EIPEC2Association:
+        Type: 'AWS::EC2::EIPAssociation'     
+        Properties:
+          InstanceId: !Ref EC2Instance
+          EIP: !Ref EIPAddress 
+Outputs:
+    InstanceId:
+        Description: InstanceId of EC2 instance
+        Value:
+            Ref: EC2Instance
+    PublicIP:
+        Description: Public IP address. You may need for ssh login.
+        Value:
+            'Fn::GetAtt':
+                - EC2Instance
+                - PublicIp

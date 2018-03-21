@@ -1,0 +1,41 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation s3 template.'
+
+Parameters:
+  S3BucketName:
+     Type: String
+     Description: S3 bucket name.
+     Default: verizoninfrabucket
+            
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      LifecycleConfiguration:
+         Rules:
+           - 
+            ExpirationInDays: 1
+            Status: Enabled      
+      Tags:
+        - Key: application
+          Value: demo    
+#Icase you want more granular secure bucket policy          
+#  BucketPolicy:
+#    Type: AWS::S3::BucketPolicy
+#    Properties:
+#     PolicyDocument:
+#       Id: demo-policy
+#      Version: '2012-10-17'
+#       Statement:
+#        - Sid: AllowReadWriteAccess
+#          Effect: Allow
+#          Principal:
+#             AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:user/${UserName}'
+#          Action: 's3:*'
+#          Resource: !Sub '${S3Bucket.Arn}/*' 
+#     Bucket: !Ref S3Bucket        
+Outputs:
+  BucketName: 
+    Description: Bucket name
+    Value: !Ref S3Bucket

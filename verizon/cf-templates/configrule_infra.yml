@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation aws-Config template : This template would enable AWS Config and 
+              create a new rule to list all the users and would diasble the user who has not looged in for 90 days
+              and delete the user who has not logged in for 180 days'
+Parameters:
+  DeliveryChannelExists:
+    Type: String
+    Description: 'Do you have an exisiting AWS Config delivery channel? Only one deliverychannel allowed.'
+    Default: false
+    AllowedValues: [false, true]
+  ConfigRecorderExists:
+    Type: String  
+    Description: 'Do you have an exisiting AWS Config delivery channel?Only one config recoder allowed.'
+    Default: false
+    AllowedValues: [false, true]  
+  Env: 
+    Type: String
+    Description: Env Name
+    Default: sandbox
+  AppName: 
+    Type: String
+    Description: Env Name
+    Default: verizon-config-rules
+  DisableUserDaysAfter:
+    Type: Number
+    Description: If user has not logged in for 90 fays diable it.
+    Default: 90
+  DeleteUserDaysAfter:
+    Type: Number
+    Description: If user has not logged in for 180 fays delete it.
+    Default: 180
+  LambdaFunctionName:
+    Type: String
+    Description: Name of the lambda function which would be triggered by aws config event.
+    Default: IAMUsersComplianceFunction  
+          
+Conditions:
+  CreateDeliveryChannel: !Equals [ !Ref DeliveryChannelExists, false ]
+  CreateConfigRecorder: !Equals [ !Ref ConfigRecorderExists, false ]
+Resources:
+  ConfigRecorder:
+    Condition: CreateConfigRecorder
+    Type: AWS::Config::ConfigurationRecorder
+    DependsOn: [ConfigBucket, ConfigTopic]
+    Properties:
+      Name: default
+      RecordingGroup:
+        ResourceTypes: ['AWS::IAM::User']
+      RoleARN: !GetAtt [ConfigRole, Arn]
+  DeliveryChannel:
+    Condition: CreateDeliveryChannel  
+    Type: AWS::Config::DeliveryChannel
+    DependsOn: [ConfigBucket, ConfigTopic]
+    Properties:
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: Six_Hours
+      S3BucketName: !Ref ConfigBucket
+      SnsTopicARN: !Ref ConfigTopic
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+  ConfigTopic:
+    Type: AWS::SNS::Topic
+  ConfigTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Id: ConfigTopicPolicy
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: config.amazonaws.com
+          Action: SNS:Publish
+          Resource: '*'
+      Topics: [!Ref ConfigTopic]
+  IAMUserComplianceConfigRules:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: IAMUserComplianceConfigRules
+      InputParameters:
+        DisableUserDaysAfter: !Ref DisableUserDaysAfter
+        DeleteUserDaysAfter: !Ref DeleteUserDaysAfter 
+      Scope:
+        ComplianceResourceTypes: ['AWS::IAM::User']
+      Source:
+        Owner: CUSTOM_LAMBDA
+        SourceDetails:
+        - EventSource: aws.config
+          #MaximumExecutionFrequency: One_Hour
+          MessageType: ConfigurationItemChangeNotification #,ScheduledNotification
+        SourceIdentifier: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LambdaFunctionName}"
+    DependsOn: [ConfigPermissionToCallLambda]
+  ConfigPermissionToCallLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LambdaFunctionName}"
+      Action: lambda:InvokeFunction
+      Principal: config.amazonaws.com
+  ConfigRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [config.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWSConfigRole']
+      Policies:
+      - PolicyName: root
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: s3:GetBucketAcl
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref 'ConfigBucket']]
+          - Effect: Allow
+            Action: s3:PutObject
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref 'ConfigBucket', /AWSLogs/,
+                !Ref 'AWS::AccountId', /*]]
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Effect: Allow
+            Action: config:Put*
+            Resource: '*'
+Outputs: 
+  IAMUserComplianceConfigRulesType:
+    Value: !GetAtt [IAMUserComplianceConfigRules, Compliance.Type]

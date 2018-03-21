@@ -1,0 +1,14 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.8	//
+APPLICABLE_RESOURCES	../src/lambda.py	/^APPLICABLE_RESOURCES = ["AWS::IAM::User"]$/;"	kind:variable	line:13
+boto3	../src/lambda.py	/^import boto3$/;"	kind:namespace	line:9
+calculate_age	../src/lambda.py	/^def calculate_age(date):$/;"	kind:function	line:16
+datetime	../src/lambda.py	/^import datetime$/;"	kind:namespace	line:10
+evaluate_compliance	../src/lambda.py	/^def evaluate_compliance(configuration_item, rule_parameters):$/;"	kind:function	line:24
+json	../src/lambda.py	/^import json$/;"	kind:namespace	line:8
+lambda.py	../src/lambda.py	1;"	kind:file	line:1
+lambda_handler	../src/lambda.py	/^def lambda_handler(event, context):$/;"	kind:function	line:55
